@@ -1,0 +1,20 @@
+{
+  "indexes": [
+    { "collectionGroup": "trips", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "status", "order": "ASCENDING" }, { "fieldPath": "departureAt", "order": "ASCENDING" } ] },
+    { "collectionGroup": "trips", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "captainId", "order": "ASCENDING" }, { "fieldPath": "status", "order": "ASCENDING" },
+      { "fieldPath": "departureAt", "order": "ASCENDING" } ] },
+    { "collectionGroup": "trips", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "captainId", "order": "ASCENDING" }, { "fieldPath": "departureAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "trips", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "waitlistUids", "arrayConfig": "CONTAINS" }, { "fieldPath": "status", "order": "ASCENDING" } ] },
+    { "collectionGroup": "bookings", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "riderUid", "order": "ASCENDING" }, { "fieldPath": "departureAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "rideRequests", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "riderUid", "order": "ASCENDING" }, { "fieldPath": "desiredAt", "order": "DESCENDING" } ] },
+    { "collectionGroup": "rideRequests", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "status", "order": "ASCENDING" }, { "fieldPath": "desiredAt", "order": "ASCENDING" } ] }
+  ],
+  "fieldOverrides": []
+}

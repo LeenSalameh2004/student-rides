@@ -1,0 +1,111 @@
+rules_version = '2';
+
+// Roles live in users/{uid}.role: 'student' | 'captain' | 'admin'.
+// The first admin is set by hand in the Firebase console (see README).
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function userDoc(uid) { return get(/databases/$(database)/documents/users/$(uid)); }
+    function me() { return userDoc(request.auth.uid).data; }
+    function hasProfile() { return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)); }
+    function isAdmin() { return hasProfile() && me().role == 'admin'; }
+    function isCaptain() { return hasProfile() && me().role == 'captain'; }
+    function ownsCaptain(captainId) { return isCaptain() && me().captainId == captainId; }
+    function isStaffFor(captainId) { return isAdmin() || ownsCaptain(captainId); }
+    function tripPath(id) { return /databases/$(database)/documents/trips/$(id); }
+    function captainPath(id) { return /databases/$(database)/documents/captains/$(id); }
+
+    // ---------- users ----------
+    match /users/{uid} {
+      allow read: if signedIn() && (request.auth.uid == uid || isAdmin());
+
+      // Sign-up: students freely; captains only if the admin registered this email.
+      allow create: if signedIn() && request.auth.uid == uid
+        && request.resource.data.email == request.auth.token.email
+        && (
+          (request.resource.data.role == 'student' && request.resource.data.captainId == null)
+          || (request.resource.data.role == 'captain'
+              && get(captainPath(request.resource.data.captainId)).data.email == request.auth.token.email
+              && get(captainPath(request.resource.data.captainId)).data.uid == null)
+        );
+
+      // People edit their own profile but never their role, captain link or email.
+      allow update: if isAdmin() || (
+        request.auth.uid == uid
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'captainId', 'email'])
+      );
+      allow delete: if isAdmin();
+    }
+
+    // ---------- captains (drivers & cars, entered by the admin) ----------
+    match /captains/{captainId} {
+      allow read: if signedIn();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin()
+        // A captain claiming their record at sign-up: only `uid`, only once, only with the matching email.
+        || (signedIn()
+            && resource.data.uid == null
+            && resource.data.email == request.auth.token.email
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['uid'])
+            && request.resource.data.uid == request.auth.uid);
+    }
+
+    // ---------- trips ----------
+    match /trips/{tripId} {
+      allow read: if signedIn();
+      allow create: if isStaffFor(request.resource.data.captainId)
+        && request.resource.data.status == 'open'
+        && request.resource.data.riderUids.size() == 0;
+      allow delete: if isAdmin();
+
+      allow update: if isStaffFor(resource.data.captainId) || studentSeatChange();
+
+      // Students may only touch seat/waitlist fields, only on open trips, only one rider at a time,
+      // and only in a change that involves themselves (book, cancel, join/leave waitlist).
+      // Seat-level validation is done in the app's transactions (src/lib/seats.js).
+      function studentSeatChange() {
+        let before = resource.data;
+        let after = request.resource.data;
+        let me_ = request.auth.uid;
+        return hasProfile() && me().role == 'student'
+          && before.status == 'open'
+          && after.diff(before).affectedKeys().hasOnly(['seats', 'riderUids', 'waitlist', 'waitlistUids'])
+          && after.riderUids.size() <= before.seatCount
+          && (after.riderUids.size() - before.riderUids.size()) <= 1
+          && (after.riderUids.size() - before.riderUids.size()) >= -1
+          && (me_ in after.riderUids || me_ in before.riderUids
+              || me_ in after.waitlistUids || me_ in before.waitlistUids);
+      }
+    }
+
+    // ---------- bookings (id = {tripId}_{riderUid}) ----------
+    match /bookings/{bookingId} {
+      allow read: if signedIn() && (
+        resource.data.riderUid == request.auth.uid || isStaffFor(resource.data.captainId)
+      );
+
+      allow create, update: if signedIn()
+        && bookingId == request.resource.data.tripId + '_' + request.resource.data.riderUid
+        && (
+          isStaffFor(request.resource.data.captainId)
+          || request.resource.data.riderUid == request.auth.uid
+          // A student cancelling hands their seat to the first person on the waitlist.
+          || (request.auth.uid in get(tripPath(request.resource.data.tripId)).data.riderUids
+              && request.resource.data.riderUid in getAfter(tripPath(request.resource.data.tripId)).data.riderUids)
+        );
+      allow delete: if isAdmin();
+    }
+
+    // ---------- scheduled ride requests ----------
+    match /rideRequests/{reqId} {
+      allow read: if signedIn() && (resource.data.riderUid == request.auth.uid || isCaptain() || isAdmin());
+      allow create: if signedIn() && request.resource.data.riderUid == request.auth.uid
+        && request.resource.data.status == 'pending';
+      allow update: if isAdmin() || isCaptain()
+        || (resource.data.riderUid == request.auth.uid && request.resource.data.status == 'cancelled'
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']));
+      allow delete: if isAdmin();
+    }
+  }
+}
